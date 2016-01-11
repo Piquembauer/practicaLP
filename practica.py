@@ -11,6 +11,7 @@ import HTMLParser
 import codecs
 import time
 
+# llegeix el fitxer .csb i crea una llista amb totes les estacions de bus
 def creaLlistaEstBus ():
 	llEstBus = []
 	fitxerBusos = open('ESTACIONS_BUS.csv', 'rb')
@@ -20,6 +21,7 @@ def creaLlistaEstBus ():
 	fitxerBusos.close()
 	return llEstBus
 
+# llegeix el fitxer .csb i crea una llista amb totes les estacions de tren i metro
 def creaLlistaEstTren ():
 	llEstTren = []
 	fitxerTren = open('TRANSPORTS.csv', 'rb')
@@ -57,7 +59,7 @@ def buscaEstacionsBicing (lat, lon, rBici):
 		lat2 = float(station.find("lat").text)
 		lon2 = float(station.find("long").text)
 		dist = distancia(lat, lon, lat2, lon2)
-		if (dist <= 500):
+		if (dist <= 0.5):
 			if int(station.find("slots").text) > 0:
 				llSlots.append(station)
 			if int(station.find("bikes").text) > 0:
@@ -96,7 +98,7 @@ def buscaEstacionsTren (llEstacions, lat, lon):
 		lat2 = float(row["LATITUD"])
 		lon2 = float(row["LONGITUD"])
 		dist = distancia(lat, lon, lat2, lon2)
-		if (dist <= 500):
+		if (dist <= 0.5):
 			llTrens.append(row)
 	llTrens.sort(key=lambda x : distancia(lat, lon, float(x["LATITUD"]), float(x["LONGITUD"])))
 	return llTrens
@@ -170,7 +172,13 @@ def obteLinies(parada):
 	setLinies.update(linies)
 	return setLinies
 
-def escriuTransport(llTrans, htmlFile):
+def convertUnicode (lletra):
+	try:
+		return u"" + lletra
+	except UnicodeDecodeError:
+		return "*"
+
+def escriuTransport(llTrans, htmlFile, lat, lon):
 	llLinies = obteLinies(llTrans[0]["EQUIPAMENT"])
 	if len(llTrans) > 1:
 		llLinies.update(obteLinies(llTrans[1]["EQUIPAMENT"]))
@@ -192,17 +200,22 @@ def escriuTransport(llTrans, htmlFile):
 	rowspan = len(llTrans) + 1
 	escriuInfoActivitat(activitat, rowspan)
 	htmlFile.write(u'<td rowspan="' + str(rowspan) + '">Transport public</td>')
+
 	for trans in llTrans:
 		htmlFile.write(u"<tr>")
-		try:
-			htmlFile.write(u"<td>" + trans["EQUIPAMENT"] + "</td>")
-		except UnicodeDecodeError:
-			htmlFile.write(u"<td>" + "UnicodeDecodeError" + "</td>")
+		paraula = ""
+		for i in trans["EQUIPAMENT"]:
+			paraula += convertUnicode(i)
+		htmlFile.write(u"<td>" + paraula + "</td>")
+
+		dist = distancia(lat, lon, float(trans["LATITUD"]), float(trans["LONGITUD"]))
+		htmlFile.write(u"<td>" + str(int(dist*1000)) + "</td>")
+
 		htmlFile.write(u"</tr>")	
 
 # escriu a la taula html les estacions de bicing properes
 # a l'activitat
-def escriuBicing(htmlFile, llBicis, llSlots, activitat):
+def escriuBicing(htmlFile, llBicis, llSlots, activitat, lat, lon):
 	rwspanBicis = len(llBicis[:5]) + 1
 	rwspanSlots = len(llSlots[:5]) + 1
 	rowspan = rwspanBicis + rwspanSlots + 1
@@ -210,6 +223,7 @@ def escriuBicing(htmlFile, llBicis, llSlots, activitat):
 
 	htmlFile.write(u"<tr>")
 	htmlFile.write(u'<td rowspan="' + str(rwspanBicis) + '"><p>Bicing<p>(bicis disponibles)</td>')
+
 	for bici in llBicis[:5]:
 		htmlFile.write(u"<tr>")
 		try:
@@ -217,11 +231,18 @@ def escriuBicing(htmlFile, llBicis, llSlots, activitat):
 			", " + bici.find("streetNumber").text + "</td>")
 		except TypeError:
 			htmlFile.write(u"<td>" + bici.find("street").text + "</td>")
+		
+		lat2 = float(bici.find("lat").text)
+		lon2 = float(bici.find("long").text)
+		dist = distancia(lat, lon, lat2, lon2)
+		htmlFile.write(u"<td>" + str(int(dist*1000)) + "</td>")
+
 		htmlFile.write(u"</tr>")
 	htmlFile.write(u"</tr>")
 
 	htmlFile.write(u"<tr>")
 	htmlFile.write(u'<td rowspan="' + str(rwspanSlots) + '"><p>Bicing<p>(slots lliures)</td>')
+
 	for bici in llSlots[:5]:
 		htmlFile.write(u"<tr>")
 		try:
@@ -229,6 +250,12 @@ def escriuBicing(htmlFile, llBicis, llSlots, activitat):
 			", " + bici.find("streetNumber").text + "</td>")
 		except TypeError:
 			htmlFile.write(u"<td>" + bici.find("street").text + "</td>")
+
+		lat2 = float(bici.find("lat").text)
+		lon2 = float(bici.find("long").text)
+		dist = distancia(lat, lon, lat2, lon2)
+		htmlFile.write(u"<td>" + str(int(dist*1000)) + "</td>")
+
 		htmlFile.write(u"</tr>")
 	htmlFile.write(u"</tr>")
 
@@ -237,6 +264,7 @@ def escriuPeu(activitat):
 	escriuInfoActivitat(activitat, 1)
 	htmlFile.write(u"<td>A peu</td>")
 	htmlFile.write(u"<td>Amb sabates o descalç</td>")
+	htmlFile.write(u"<td>Si camines ràpid se't farà més curt</td>")
 	
 # escriu la informacio de l'activitat en una taula html
 def escriuInfoActivitat (activitat, rowS):
@@ -293,7 +321,7 @@ plantillaHtml = u"""
 			<caption>Resultats de la cerca</caption>
 			<tr>
 				<th colspan="4">Esdeveniment</th>
-				<th colspan="2">Transport</th>
+				<th colspan="3">Transport</th>
 			</tr>
 			<tr>
 				<th> </th>
@@ -302,12 +330,13 @@ plantillaHtml = u"""
 				<th style="width:10%">Data</th>
 				<th>Tipus transport</th>
 				<th>Opcions</th>
+				<th>Distància</th>
 			</tr>
 """
-totalBuscar = 0
 totalTrens = 0
 totalBusos = 0
 totalBicis = 0
+tempsEscriure = 0
 htmlFile = codecs.open("activitats.html", "w", "utf-8")
 htmlFile.write(plantillaHtml)
 numAct = 1
@@ -315,7 +344,6 @@ for activitat in buscaActivitats(rAct):
 	htmlFile.write(u"<tr>")
 
 	# transport (bicing o FCG)
-	temps2 = time.time();
 	llTipusTrans = eval(sys.argv[2])
 	coord = activitat.find("lloc_simple/adreca_simple/coordenades/googleMaps").attrib
 	lat = float(coord["lat"])
@@ -325,7 +353,7 @@ for activitat in buscaActivitats(rAct):
 	totalBicis += time.time() - temps3
 	
 	temps3 = time.time()
-	llTrens = buscaEstacionsTren(llEstTren,lat, lon)
+	llTrens = buscaEstacionsTren(llEstTren, lat, lon)
 	totalTrens += time.time() - temps3
 
 	temps3 = time.time()
@@ -333,21 +361,22 @@ for activitat in buscaActivitats(rAct):
 	totalBusos += time.time() - temps3
 
 	llTrans = llTrens[0:1] + llBusDiurn[0:1] + llBusNocturn[0:1]
-	totalBuscar += time.time() - temps2
 
 	# busca quin tipus de transport utilitzara l'usuari
 	tipusTrans = buscaTipusTransport(llTipusTrans, llTrans, llSlots + llBicis)
 
+	time4 = time.time()
 	if tipusTrans == "transport":
 		# mira que escrigui el transport totes les vegades i no nomes la primera
-		escriuTransport(llTrans, htmlFile)
+		escriuTransport(llTrans, htmlFile, lat, lon)
 
 	elif tipusTrans == "bicing":
-		escriuBicing(htmlFile, llBicis, llSlots, activitat)
+		escriuBicing(htmlFile, llBicis, llSlots, activitat, lat, lon)
 
 	# a peu
 	else:
 		escriuPeu(activitat)
+	tempsEscriure += time.time() - time4
 
 	numAct += 1
 	htmlFile.write(u"</tr>")
@@ -360,4 +389,5 @@ htmlFile.close()
 print "Temps total bicis:", totalBicis
 print "Temps total busos", totalBusos
 print "Temps total trens", totalTrens
+print "Temps escriure", tempsEscriure
 print "Temps total:", time.time() - temps0
